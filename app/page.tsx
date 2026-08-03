@@ -2,12 +2,23 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { authClient } from '@/lib/auth-client'
 import { HomeDashboard } from '@/components/home-dashboard'
 import { GameMenu } from '@/components/game-menu'
-import { GameScene } from '@/components/game-scene'
 import { MatchHUD } from '@/components/match-hud'
 import { useGameStore } from '@/lib/game-store'
+
+// CRITICAL VERCEL FIX: Dynamically import 3D GameScene with SSR disabled so cloud servers don't crash evaluating WebGL & WebAssembly
+const GameScene = dynamic(() => import('@/components/game-scene').then(m => m.GameScene), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-slate-950 text-white z-20 space-y-4">
+      <div className="w-12 h-12 border-4 border-amber-400 border-t-transparent rounded-full animate-spin shadow-lg shadow-amber-500/20" />
+      <div className="font-extrabold text-lg tracking-widest uppercase text-amber-400">Loading 3D Stadium & &nbsp;Superstars...</div>
+    </div>
+  )
+})
 
 export default function Page() {
   const router = useRouter()
@@ -95,14 +106,14 @@ export default function Page() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-blue-600 to-blue-400">
-        <div className="text-white text-2xl">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen bg-slate-950">
+        <div className="text-amber-400 text-xl font-bold tracking-wider animate-pulse">Checking credentials...</div>
       </div>
     )
   }
 
   return (
-    <div className="w-full h-screen bg-slate-900">
+    <div className="w-full h-screen bg-slate-950 overflow-hidden relative">
       {currentView === 'home' && <HomeDashboard onPlayClick={handlePlayFromHome} />}
 
       {currentView === 'menu' && (
@@ -110,7 +121,7 @@ export default function Page() {
       )}
 
       {currentView === 'game' && (
-        <div className="relative w-full h-full">
+        <div className="relative w-full h-full bg-slate-950">
           <GameScene />
           <MatchHUD matchTime={matchTime} onExit={handleBackToMenu} />
         </div>
