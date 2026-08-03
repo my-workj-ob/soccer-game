@@ -3,9 +3,14 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.app',
+  title: 'EA SPORTS FC 3D - Pro Soccer',
+  description: 'Next generation realistic 3D soccer simulation game',
+  generator: 'v0.app & Antigravity Pro',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'EA FC 3D',
+  },
   icons: {
     icon: [
       {
@@ -26,11 +31,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
-  ],
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#09090b',
 }
 
 export default function RootLayout({
@@ -40,7 +46,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
+      <body className="antialiased w-full h-screen overflow-hidden select-none bg-slate-950">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

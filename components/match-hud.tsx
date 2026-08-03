@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
-import { Pause, Trophy, Shield, Flag, Repeat, Camera, LogOut, Sliders, RefreshCw, FileText, Settings as SettingsIcon, AlertCircle, BarChart2 } from 'lucide-react'
+import { Pause, Trophy, Shield, Flag, Repeat, Camera, LogOut, Sliders, RefreshCw, FileText, Settings as SettingsIcon, AlertCircle, BarChart2, Maximize, Minimize } from 'lucide-react'
 import { useGameStore, TacticalPreset } from '@/lib/game-store'
 
 interface MatchHUDProps {
@@ -57,11 +57,34 @@ export function MatchHUD({
   const [isDragging, setIsDragging] = useState(false)
   const [showTacticsModal, setShowTacticsModal] = useState(false)
   const [showMobileTelemetry, setShowMobileTelemetry] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const joystickCenterRef = useRef<HTMLDivElement>(null)
+
+  const toggleFullscreen = () => {
+    try {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().then(() => {
+          setIsFullscreen(true)
+          // Lock to landscape if phone browser supports it
+          if ('orientation' in screen && (screen.orientation as any).lock) {
+            (screen.orientation as any).lock('landscape').catch(() => {})
+          }
+        }).catch(() => {})
+      } else {
+        document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {})
+      }
+    } catch (err) {
+      console.warn('Fullscreen gesture restricted by browser environment')
+    }
+  }
 
   const handlePointerDown = (e: React.PointerEvent) => {
     setIsDragging(true)
     updateJoystick(e.clientX, e.clientY)
+    // Opportunistic orientation check on initial interact
+    if (!document.fullscreenElement && 'orientation' in screen && (screen.orientation as any).lock) {
+      (screen.orientation as any).lock('landscape').catch(() => {})
+    }
   }
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -112,7 +135,7 @@ export function MatchHUD({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* --- REFEREE EVENT OVERLAY BANNERS (MOVED HIGH TO NOT OBSCURE FIELD) --- */}
+      {/* --- REFEREE EVENT OVERLAY BANNERS --- */}
       {refereeEvent && (
         <div className="absolute inset-x-0 top-12 sm:top-20 flex justify-center pointer-events-none z-50 animate-bounce">
           <div className="px-5 py-2 sm:px-8 sm:py-3 rounded-2xl border-2 backdrop-blur-xl bg-slate-950/95 border-amber-400 text-amber-400 shadow-2xl flex items-center gap-3 text-base sm:text-2xl font-black uppercase tracking-wider">
@@ -158,15 +181,15 @@ export function MatchHUD({
         </div>
       )}
 
-      {/* --- TOP HEADER (COMPACT ON MOBILE LANDSCAPE) --- */}
+      {/* --- TOP HEADER WITH FULLSCREEN BUTTON --- */}
       <div className="p-2 sm:p-4 flex items-center justify-between pointer-events-auto w-full z-40">
-        <div className="flex items-center gap-1.5 sm:gap-2 shadow-2xl">
+        <div className="flex items-center gap-1 sm:gap-2 shadow-2xl">
           <div className="w-7 h-7 sm:w-9 sm:h-9 bg-slate-950/90 border border-amber-500/50 rounded-lg flex items-center justify-center font-black text-[10px] sm:text-xs text-amber-400">
             UCL
           </div>
 
-          <div className="flex items-center bg-slate-950/90 border border-slate-800 rounded-lg overflow-hidden h-7 sm:h-9 px-2 sm:px-3 gap-2 text-white font-bold tracking-wider">
-            <span className="text-xs sm:text-sm text-slate-200 font-extrabold flex items-center gap-1"><span className="text-[10px]">⚪</span> {team1Name}</span>
+          <div className="flex items-center bg-slate-950/90 border border-slate-800 rounded-lg overflow-hidden h-7 sm:h-9 px-2 sm:px-3 gap-1.5 text-white font-bold tracking-wider">
+            <span className="text-[11px] sm:text-sm text-slate-200 font-extrabold flex items-center gap-1"><span className="text-[10px]">⚪</span> {team1Name}</span>
             {team1Reds > 0 && <span className="w-2 h-3 bg-rose-600 rounded-xs block" />}
             
             <div className="bg-amber-400 text-slate-950 px-2 sm:px-3 py-0.5 rounded font-black text-xs sm:text-base flex items-center gap-1 shadow-sm">
@@ -176,28 +199,36 @@ export function MatchHUD({
             </div>
 
             {team2Reds > 0 && <span className="w-2 h-3 bg-rose-600 rounded-xs block" />}
-            <span className="text-xs sm:text-sm text-slate-200 font-extrabold flex items-center gap-1">{team2Name} <span className="text-[10px]">🔵</span></span>
+            <span className="text-[11px] sm:text-sm text-slate-200 font-extrabold flex items-center gap-1">{team2Name} <span className="text-[10px]">🔵</span></span>
           </div>
 
-          <div className="h-7 sm:h-9 px-2.5 sm:px-4 bg-slate-950/90 border border-slate-800 rounded-lg flex items-center text-white font-mono font-bold text-xs sm:text-base">
+          <div className="h-7 sm:h-9 px-2 sm:px-4 bg-slate-950/90 border border-slate-800 rounded-lg flex items-center text-white font-mono font-bold text-xs sm:text-base">
             {String(minutes + 70).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Mobile Telemetry Toggle Button */}
+          {/* INSTANT FULLSCREEN & ORIENTATION LOCK BUTTON */}
           <button
-            onClick={() => setShowMobileTelemetry(!showMobileTelemetry)}
-            className="xl:hidden h-7 sm:h-9 px-2.5 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 shadow-lg"
+            onClick={toggleFullscreen}
+            title="Toggle Fullscreen Mode"
+            className="h-7 sm:h-9 px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-[10px] sm:text-xs font-black uppercase flex items-center gap-1 shadow-lg transition-transform active:scale-95"
           >
-            <BarChart2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">FUT Stats</span>
+            {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+            <span>{isFullscreen ? 'Oddiy' : "To'liq Ekran"}</span>
           </button>
 
-          {/* Mobile Tactics Button */}
+          <button
+            onClick={() => setShowMobileTelemetry(!showMobileTelemetry)}
+            className="xl:hidden h-7 sm:h-9 px-2 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 shadow-lg"
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Stats</span>
+          </button>
+
           <button
             onClick={() => setShowTacticsModal(true)}
-            className="lg:hidden h-7 sm:h-9 px-2.5 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 shadow-lg"
+            className="lg:hidden h-7 sm:h-9 px-2 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 shadow-lg"
           >
             <Sliders className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Tactics</span>
@@ -205,17 +236,19 @@ export function MatchHUD({
 
           <button
             onClick={cycleCamera}
-            className="h-7 sm:h-9 px-2.5 sm:px-3 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] sm:text-xs font-bold uppercase flex items-center gap-1.5 transition shadow-lg"
+            className="h-7 sm:h-9 px-2 sm:px-3 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-amber-400 rounded-lg text-[10px] sm:text-xs font-bold uppercase flex items-center gap-1 transition shadow-lg"
           >
             <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            <span>Cam: {cameraView.split('-')[0]}</span>
+            <span>Cam</span>
           </button>
+
           <button
             onClick={onPause}
             className="w-7 h-7 sm:w-9 sm:h-9 bg-slate-950/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500 text-white rounded-lg flex items-center justify-center transition shadow-lg"
           >
             <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
           </button>
+
           {onExit && (
             <button
               onClick={onExit}
@@ -228,9 +261,8 @@ export function MatchHUD({
         </div>
       </div>
 
-      {/* --- MIDDLE SIDE PANELS (HIDDEN ON MOBILE BY DEFAULT TO KEEP FIELD 100% CLEAR) --- */}
+      {/* --- MIDDLE SIDE PANELS --- */}
       <div className="flex items-start justify-between px-4 sm:px-6 pointer-events-auto z-30 mt-1">
-        {/* Left Stats: PC Only */}
         <div className="hidden xl:block w-64 bg-slate-950/85 backdrop-blur-md rounded-2xl border border-slate-800/80 p-4 shadow-2xl text-white">
           <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3 pb-2 border-b border-slate-800/80 flex justify-between">
             <span>Match Stats</span>
@@ -253,7 +285,6 @@ export function MatchHUD({
           </div>
         </div>
 
-        {/* Right FUT Telemetry Card: Desktop ONLY or Mobile Toggle */}
         <div className={`${showMobileTelemetry ? 'flex' : 'hidden xl:flex'} w-72 sm:w-80 bg-slate-950/90 backdrop-blur-md rounded-2xl border-2 border-amber-500/60 p-3.5 shadow-2xl text-white flex-col gap-2.5 absolute right-4 sm:static top-14 z-50`}>
           <div className="flex justify-between items-center pb-1 border-b border-slate-800">
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">
@@ -310,10 +341,10 @@ export function MatchHUD({
         </div>
       </div>
 
-      {/* --- ERGONOMIC MOBILE TOUCH CONTROLLER PADDING & THUMB JOYSTICK --- */}
+      {/* --- ERGONOMIC MOBILE TOUCH CONTROLLER --- */}
       <div className="flex items-end justify-between px-3 sm:px-8 pb-3 sm:pb-8 pointer-events-auto z-30 w-full mb-0 sm:mb-12">
         
-        {/* LEFT THUMB: JOYSTICK & COMPACT STAMINA BAR */}
+        {/* LEFT THUMB: JOYSTICK */}
         <div className="flex flex-col items-start gap-2 sm:gap-4">
           <div className="bg-slate-950/80 backdrop-blur-sm border border-slate-800 rounded-lg px-2.5 py-1.5 flex flex-col w-40 sm:w-52 shadow-xl">
             <div className="flex items-center gap-1.5 text-xs font-black text-white justify-between">
@@ -391,10 +422,8 @@ export function MatchHUD({
           </div>
         </div>
 
-        {/* RIGHT THUMB: CONSOLE ARCADE BUTTON DIAMOND CLUSTER */}
+        {/* RIGHT THUMB: CONSOLE ARCADE BUTTON CLUSTER */}
         <div className="relative w-56 h-48 sm:w-64 sm:h-56 flex items-center justify-end pr-2">
-          
-          {/* SWITCH PLAYER (Top Left of cluster) */}
           <button
             onPointerDown={() => switchPlayerToClosest()}
             className="absolute top-1 left-2 sm:top-2 sm:left-4 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-slate-950/80 border-2 border-slate-400/80 text-white font-black text-[9px] sm:text-[10px] uppercase shadow-xl hover:scale-105 active:scale-90 transition flex flex-col items-center justify-center"
@@ -403,7 +432,6 @@ export function MatchHUD({
             <span>SWITCH</span>
           </button>
 
-          {/* THROUGH BALL (Top Center/Right) */}
           <button
             onPointerDown={() => triggerAction('through')}
             className="absolute top-0 right-14 sm:top-2 sm:right-18 w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-slate-950/85 border-[3px] border-yellow-400 text-yellow-300 font-extrabold text-xs sm:text-sm uppercase shadow-2xl shadow-yellow-500/30 hover:scale-105 active:scale-90 transition flex items-center justify-center"
@@ -411,7 +439,6 @@ export function MatchHUD({
             THROUGH
           </button>
 
-          {/* PASS (Bottom Left of shoot) */}
           <button
             onPointerDown={() => triggerAction('pass')}
             className="absolute bottom-2 left-6 sm:bottom-4 sm:left-10 w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-slate-950/85 border-[3px] border-sky-400 text-sky-300 font-extrabold text-xs sm:text-sm uppercase shadow-2xl shadow-sky-500/30 hover:scale-105 active:scale-90 transition flex items-center justify-center"
@@ -419,7 +446,6 @@ export function MatchHUD({
             PASS
           </button>
 
-          {/* SPRINT / SLIDE TACKLE (Bottom Right under shoot) */}
           <button
             onPointerDown={() => {
               if (ballPossession !== 1) triggerAction('tackle')
@@ -438,7 +464,6 @@ export function MatchHUD({
             )}
           </button>
 
-          {/* SHOOT (Primary Thumb Strike Target - Rightmost Edge) */}
           <button
             onPointerDown={() => triggerAction('shoot')}
             className="absolute top-1/2 -translate-y-1/2 right-0 w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-slate-950/95 border-4 border-orange-500 text-white font-black text-sm sm:text-base uppercase shadow-2xl shadow-orange-500/50 hover:scale-105 active:scale-90 transition flex items-center justify-center"
