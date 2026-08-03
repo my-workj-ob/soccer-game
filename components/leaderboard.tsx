@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import { useGameStore } from '@/lib/game-store'
 
 interface LeaderboardEntry {
   rank: number
@@ -14,105 +15,28 @@ interface LeaderboardEntry {
 }
 
 const MOCK_LEADERBOARD: LeaderboardEntry[] = [
-  {
-    rank: 1,
-    playerName: '⚽ Messi_Master',
-    rating: 2850,
-    wins: 156,
-    losses: 12,
-    goalDiff: 89,
-    winRate: 92.9,
-  },
-  {
-    rank: 2,
-    playerName: '🔥 Ronaldo_7',
-    rating: 2790,
-    wins: 152,
-    losses: 18,
-    goalDiff: 76,
-    winRate: 89.4,
-  },
-  {
-    rank: 3,
-    playerName: '⭐ VanDijk_Pro',
-    rating: 2650,
-    wins: 138,
-    losses: 24,
-    goalDiff: 64,
-    winRate: 85.2,
-  },
-  {
-    rank: 4,
-    playerName: '🎯 GoalHunter',
-    rating: 2520,
-    wins: 125,
-    losses: 35,
-    goalDiff: 51,
-    winRate: 78.1,
-  },
-  {
-    rank: 5,
-    playerName: '💎 Elite_Striker',
-    rating: 2450,
-    wins: 118,
-    losses: 42,
-    goalDiff: 47,
-    winRate: 73.8,
-  },
-  {
-    rank: 6,
-    playerName: '🏆 Champion99',
-    rating: 2380,
-    wins: 110,
-    losses: 48,
-    goalDiff: 42,
-    winRate: 69.6,
-  },
-  {
-    rank: 7,
-    playerName: '⚡ SpeedDemon',
-    rating: 2310,
-    wins: 103,
-    losses: 55,
-    goalDiff: 38,
-    winRate: 65.2,
-  },
-  {
-    rank: 8,
-    playerName: '🌟 StarPlayer',
-    rating: 2240,
-    wins: 96,
-    losses: 62,
-    goalDiff: 34,
-    winRate: 60.8,
-  },
-  {
-    rank: 9,
-    playerName: '🎮 ProGamer',
-    rating: 2170,
-    wins: 89,
-    losses: 69,
-    goalDiff: 30,
-    winRate: 56.3,
-  },
-  {
-    rank: 10,
-    playerName: '👑 Futbol_King',
-    rating: 2100,
-    wins: 82,
-    losses: 76,
-    goalDiff: 26,
-    winRate: 51.9,
-  },
+  { rank: 1, playerName: '⚽ Messi_Master', rating: 2850, wins: 156, losses: 12, goalDiff: 89, winRate: 92.9 },
+  { rank: 2, playerName: '🔥 Ronaldo_7', rating: 2790, wins: 152, losses: 18, goalDiff: 76, winRate: 89.4 },
+  { rank: 3, playerName: '⭐ VanDijk_Pro', rating: 2650, wins: 138, losses: 24, goalDiff: 64, winRate: 85.2 },
+  { rank: 4, playerName: '🎯 GoalHunter', rating: 2520, wins: 125, losses: 35, goalDiff: 51, winRate: 78.1 },
+  { rank: 5, playerName: '💎 Elite_Striker', rating: 2450, wins: 118, losses: 42, goalDiff: 47, winRate: 73.8 },
+  { rank: 6, playerName: '🏆 Champion99', rating: 2380, wins: 110, losses: 48, goalDiff: 42, winRate: 69.6 },
+  { rank: 7, playerName: '⚡ SpeedDemon', rating: 2310, wins: 103, losses: 55, goalDiff: 38, winRate: 65.2 },
+  { rank: 8, playerName: '🌟 StarPlayer', rating: 2240, wins: 96, losses: 62, goalDiff: 34, winRate: 60.8 },
+  { rank: 9, playerName: '🎮 ProGamer', rating: 2170, wins: 89, losses: 69, goalDiff: 30, winRate: 56.3 },
+  { rank: 10, playerName: '👑 Futbol_King', rating: 2100, wins: 82, losses: 76, goalDiff: 26, winRate: 51.9 },
 ]
 
 export function Leaderboard() {
   const [showLeaderboard, setShowLeaderboard] = useState(false)
   const [filterPeriod, setFilterPeriod] = useState<'week' | 'month' | 'all'>('week')
+  const matchStatus = useGameStore((state) => state.matchStatus)
+
+  // Do not show floating Leaderboard button during live gameplay to prevent clashing with Camera Controls on Mobile!
+  if (matchStatus === 'playing') return null
 
   return (
     <>
-      {/* Leaderboard Button */}
       <button
         onClick={() => setShowLeaderboard(!showLeaderboard)}
         className="fixed top-4 right-4 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg z-40 transition shadow-lg"
@@ -120,7 +44,6 @@ export function Leaderboard() {
         🏆 Leaderboard
       </button>
 
-      {/* Leaderboard Panel */}
       {showLeaderboard && (
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
@@ -138,7 +61,6 @@ export function Leaderboard() {
             </button>
           </div>
 
-          {/* Period Filter */}
           <div className="flex gap-2 mb-4">
             {(['week', 'month', 'all'] as const).map((period) => (
               <button
@@ -155,7 +77,6 @@ export function Leaderboard() {
             ))}
           </div>
 
-          {/* Leaderboard Table */}
           <div className="space-y-2">
             {MOCK_LEADERBOARD.map((entry, i) => (
               <motion.div
@@ -194,7 +115,6 @@ export function Leaderboard() {
             ))}
           </div>
 
-          {/* Footer Stats */}
           <div className="mt-4 pt-4 border-t border-slate-700 text-xs text-gray-400 text-center">
             Updated every 5 minutes • Your rank: #247
           </div>
