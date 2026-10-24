@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Pause, Trophy, Shield, Flag, Repeat, Camera, LogOut, Sliders, RefreshCw, FileText, Settings as SettingsIcon, AlertCircle, BarChart2, Maximize, Minimize } from 'lucide-react'
 import { useGameStore, TacticalPreset } from '@/lib/game-store'
+import { RadarMinimap } from './radar-minimap'
 
 interface MatchHUDProps {
   matchTime?: number
@@ -31,13 +32,11 @@ export function MatchHUD({
     triggerAction,
     setIsSprinting,
     switchPlayerToClosest,
-    ballPosition,
     ballPossession,
     refereeEvent,
     cameraView,
     setCameraView,
     playerStamina,
-    playerPositions,
     fouls,
     yellowCards,
     redCards,
@@ -396,47 +395,7 @@ export function MatchHUD({
         </div>
 
         {/* CENTER: RADAR MINIMAP (TABLETS & DESKTOP ONLY) */}
-        <div className="hidden lg:flex flex-col items-center pb-2">
-          <div className="w-56 h-32 bg-slate-950/70 backdrop-blur-md border border-slate-700/60 rounded-xl p-2.5 relative shadow-2xl overflow-hidden">
-            <div className="w-full h-full border border-white/20 rounded relative flex items-center justify-center">
-              <div className="absolute h-full w-px bg-white/20" />
-              <div className="w-10 h-10 rounded-full border border-white/20" />
-
-              <div
-                style={{
-                  left: `${Math.min(92, Math.max(5, ((ballPosition[0] + 52.5) / 105) * 100))}%`,
-                  top: `${Math.min(92, Math.max(5, ((ballPosition[2] + 34) / 68) * 100))}%`,
-                }}
-                className="absolute w-2.5 h-2.5 bg-yellow-400 rounded-full shadow-lg shadow-yellow-400 animate-pulse transform -translate-x-1/2 -translate-y-1/2 z-30"
-              />
-
-              {team1Players.map((p, idx) => {
-                const pos = playerPositions[p.id] || [-35 + idx * 5, 0, -20 + (idx % 5) * 10]
-                const ratioX = ((pos[0] + 52.5) / 105) * 100
-                const ratioY = ((pos[2] + 34) / 68) * 100
-                return (
-                  <div
-                    key={`r-t1-${idx}`}
-                    style={{ left: `${Math.min(94, Math.max(6, ratioX))}%`, top: `${Math.min(94, Math.max(6, ratioY))}%` }}
-                    className={`absolute w-2 h-2 rounded-full shadow transform -translate-x-1/2 -translate-y-1/2 ${p.id === selectedPlayer?.id ? 'bg-amber-400 ring-2 ring-white scale-125 z-20' : 'bg-amber-400 z-10'}`}
-                  />
-                )
-              })}
-              {team2Players.map((p, idx) => {
-                const pos = playerPositions[p.id] || [35 - idx * 5, 0, -20 + (idx % 5) * 10]
-                const ratioX = ((pos[0] + 52.5) / 105) * 100
-                const ratioY = ((pos[2] + 34) / 68) * 100
-                return (
-                  <div
-                    key={`r-t2-${idx}`}
-                    style={{ left: `${Math.min(94, Math.max(6, ratioX))}%`, top: `${Math.min(94, Math.max(6, ratioY))}%` }}
-                    className="absolute w-2 h-2 rounded-full bg-sky-400 shadow transform -translate-x-1/2 -translate-y-1/2 z-10"
-                  />
-                )
-              })}
-            </div>
-          </div>
-        </div>
+        <RadarMinimap />
 
         {/* RIGHT THUMB: CONSOLE ARCADE BUTTON CLUSTER */}
         <div className="relative w-56 h-48 sm:w-64 sm:h-56 flex items-center justify-end pr-2">

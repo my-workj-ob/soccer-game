@@ -26,19 +26,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true)
   const [currentView, setCurrentView] = useState<'home' | 'menu' | 'game'>('home')
   const [gameStarted, setGameStarted] = useState(false)
-  const [matchTime, setMatchTime] = useState(0)
   const { resetMatch } = useGameStore()
-
-  // Match timer effect
-  useEffect(() => {
-    if (currentView !== 'game') return
-
-    const interval = setInterval(() => {
-      setMatchTime((prev) => prev + 1)
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [currentView])
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -88,7 +76,6 @@ export default function Page() {
     useGameStore.getState().setMatchStatus('idle')
     setGameStarted(true)
     setCurrentView('game')
-    setMatchTime(0)
   }
 
   const handleBackToMenu = () => {
@@ -123,7 +110,7 @@ export default function Page() {
       {currentView === 'game' && (
         <div className="relative w-full h-full bg-slate-950">
           <GameScene />
-          <MatchHUD matchTime={matchTime} onExit={handleBackToMenu} />
+          <MatchHUD onExit={handleBackToMenu} />
         </div>
       )}
     </div>

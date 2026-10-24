@@ -296,6 +296,25 @@ export function PlayerCharacter({
       if (isClosestToBall && (distToBall < 18 || !hasPossession)) {
         targetX = ballPosition[0]
         targetZ = ballPosition[2]
+      } else if (!hasPossession && role === 'defender' && opponentIds.length > 0) {
+        // Intelligent defender marking: stay goalside of nearest attacker
+        let nearestOppPos: [number, number, number] | null = null
+        let minOppDist = Infinity
+        for (const oppId of opponentIds) {
+          const oppPos = store.playerPositions[oppId]
+          if (oppPos) {
+            const d = Math.hypot(oppPos[0] - pos.x, oppPos[2] - pos.z)
+            if (d < minOppDist) {
+              minOppDist = d
+              nearestOppPos = oppPos
+            }
+          }
+        }
+        if (nearestOppPos && minOppDist < 26) {
+          const goalX = team === 1 ? -52.5 : 52.5
+          targetX = THREE.MathUtils.lerp(nearestOppPos[0], goalX, 0.35)
+          targetZ = THREE.MathUtils.lerp(nearestOppPos[2], anchor[2], 0.3)
+        }
       }
 
       const dx = targetX - pos.x

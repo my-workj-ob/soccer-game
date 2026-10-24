@@ -250,8 +250,20 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     set({ selectedPlayer: candidates[0] })
   },
-  setBallPosition: (pos) => set({ ballPosition: pos }),
-  setBallVelocity: (vel) => set({ ballVelocity: vel }),
+  setBallPosition: (pos) => {
+    const prev = get().ballPosition
+    const diff = Math.hypot(prev[0] - pos[0], prev[1] - pos[1], prev[2] - pos[2])
+    if (diff > 0.04) {
+      set({ ballPosition: pos })
+    }
+  },
+  setBallVelocity: (vel) => {
+    const prev = get().ballVelocity
+    const diff = Math.hypot(prev[0] - vel[0], prev[1] - vel[1], prev[2] - vel[2])
+    if (diff > 0.1) {
+      set({ ballVelocity: vel })
+    }
+  },
   setBallPossession: (team) => set({ ballPossession: team }),
   applyKick: (impulse) => set({ kickImpulse: impulse }),
   setDribbleVelocity: (vel: [number, number, number] | null) => void set({ dribbleVelocity: vel }),
