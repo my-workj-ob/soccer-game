@@ -24,6 +24,52 @@ export interface PlayerCharacterProps {
   jerseyNumber?: number
 }
 
+// ── Accurate FIFA/EA kit palette ───────────────────────────────────────────
+const TEAM_KITS = {
+  1: {
+    jersey: '#fafafa',
+    trim: '#d4a91e',
+    shorts: '#f0f0f0',
+    socks: '#fafafa',
+    boot: '#d4a91e',
+    gkJersey: '#eab308',
+    gkShorts: '#1a1a1a',
+  },
+  2: {
+    jersey: '#75b2dd',
+    trim: '#0a1e5c',
+    shorts: '#0a1e5c',
+    socks: '#75b2dd',
+    boot: '#22d3ee',
+    gkJersey: '#16a34a',
+    gkShorts: '#1a1a1a',
+  },
+}
+
+// ── Height references ─────────────────────────────────────────────────────
+const BASELINE_HEIGHT = 1.85 // metres
+
+// Skinned geometry body proportions (all relative to height 1.85m)
+const BODY = {
+  // Torso
+  chestW: 0.38, chestH: 0.32, chestD: 0.21,
+  absW: 0.32, absH: 0.22, absD: 0.19,
+  // Shoulders
+  shoulderRadius: 0.1,
+  upperArmR: 0.055, upperArmLen: 0.28,
+  forearmR: 0.046, forearmLen: 0.26,
+  // Hips
+  hipW: 0.34, hipH: 0.14, hipD: 0.20,
+  // Legs
+  thighR: 0.085, thighLen: 0.42,
+  calfR: 0.068, calfLen: 0.38,
+  // Feet
+  bootW: 0.10, bootH: 0.09, bootL: 0.22,
+  // Head
+  headR: 0.115,
+  neckR: 0.055, neckLen: 0.10,
+}
+
 export function PlayerCharacter({
   position,
   team,
@@ -38,613 +84,667 @@ export function PlayerCharacter({
   const headRef = useRef<THREE.Group>(null)
   const indicatorRef = useRef<THREE.Mesh>(null)
 
-  // Biomechanical Limb Joints
-  const leftThighRef = useRef<THREE.Group>(null)
-  const leftCalfRef = useRef<THREE.Mesh>(null)
-  const rightThighRef = useRef<THREE.Group>(null)
-  const rightCalfRef = useRef<THREE.Mesh>(null)
+  // Leg joint refs
+  const leftHipRef = useRef<THREE.Group>(null)
+  const leftKneeRef = useRef<THREE.Group>(null)
+  const rightHipRef = useRef<THREE.Group>(null)
+  const rightKneeRef = useRef<THREE.Group>(null)
 
+  // Arm joint refs
   const leftShoulderRef = useRef<THREE.Group>(null)
-  const leftForearmRef = useRef<THREE.Mesh>(null)
+  const leftElbowRef = useRef<THREE.Group>(null)
   const rightShoulderRef = useRef<THREE.Group>(null)
-  const rightForearmRef = useRef<THREE.Mesh>(null)
+  const rightElbowRef = useRef<THREE.Group>(null)
 
   const keysPressed = useRef<{ [key: string]: boolean }>({})
-
+  const aiCooldown = useRef(0) // AI action cooldown in seconds
   const [isTackling, setIsTackling] = useState(false)
   const [skillMoveTimer, setSkillMoveTimer] = useState(0)
 
+  const kit = TEAM_KITS[team]
   const isGK = playerData?.position === 'goalkeeper'
+  const jerseyColor = isGK ? kit.gkJersey : kit.jersey
+  const trimColor = kit.trim
+  const shortsColor = isGK ? kit.gkShorts : kit.shorts
+  const socksColor = isGK ? '#555555' : kit.socks
+  const bootColor = kit.boot
+  const skinColor = '#d4956a'
 
-  // Pro Kit Color Palettes (Real Madrid White & Gold / Man City Sky Blue & Navy)
-  const jerseyColor = isGK
-    ? team === 1 ? '#eab308' : '#22c55e'
-    : team === 1 ? '#f8fafc' : '#0284c7'
-  const trimColor = isGK ? '#000000' : team === 1 ? '#eab308' : '#ffffff'
-  const shortsColor = isGK ? '#000000' : team === 1 ? '#f8fafc' : '#1e293b'
-  const socksColor = isGK ? (team === 1 ? '#eab308' : '#22c55e') : (team === 1 ? '#f8fafc' : '#0284c7')
-  const bootColor = team === 1 ? '#facc15' : '#10b981'
+  const realHeight = playerData?.height || BASELINE_HEIGHT
+  const heightScale = realHeight / BASELINE_HEIGHT
 
-  // Real-world height scaling (Baseline is 1.85 meters)
-  const realHeight = playerData?.height || 1.85
-  const heightScale = realHeight / 1.85
+  // Skin materials (memoised-ish)
+  const matJersey = { color: jerseyColor, roughness: 0.5 }
+  const matShorts = { color: shortsColor, roughness: 0.55 }
+  const matSocks = { color: socksColor, roughness: 0.45 }
+  const matBoot = { color: bootColor, roughness: 0.15, metalness: 0.15 }
+  const matSkin = { color: skinColor, roughness: 0.7 }
+  const matTrim = { color: trimColor, roughness: 0.3, metalness: 0.1 }
 
+  // ── Keyboard bindings ─────────────────────────────────────────────────
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase()
-      keysPressed.current[key] = true
-
-      if (isSelected) {
-        if (key === 'q' || e.key === 'Tab') {
-          if (e.key === 'Tab') e.preventDefault()
-          useGameStore.getState().switchPlayerToClosest()
-        }
-        if ((key === 'c' || key === 'e') && !isTackling && useGameStore.getState().ballPossession !== team) {
-          triggerSlideTackle()
-        }
-        if (key === 'z' || key === 'r') {
-          setSkillMoveTimer(0.45)
-        }
+    const down = (e: KeyboardEvent) => {
+      keysPressed.current[e.key.toLowerCase()] = true
+      if (!isSelected) return
+      if (e.key === 'Tab') { e.preventDefault(); useGameStore.getState().switchPlayerToClosest() }
+      if ((e.key === 'c' || e.key === 'e') && !isTackling && useGameStore.getState().ballPossession !== team) {
+        triggerSlideTackle()
       }
+      if (e.key === 'z' || e.key === 'r') setSkillMoveTimer(0.4)
     }
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current[e.key.toLowerCase()] = false
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
+    const up = (e: KeyboardEvent) => { keysPressed.current[e.key.toLowerCase()] = false }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [isSelected, isTackling, team])
 
   const triggerSlideTackle = () => {
     setIsTackling(true)
     if (rigidBodyRef.current && groupRef.current) {
       const rot = groupRef.current.rotation.y
-      const forwardX = Math.sin(rot) * 28
-      const forwardZ = Math.cos(rot) * 28
-      rigidBodyRef.current.setLinvel({ x: forwardX, y: 0.2, z: forwardZ }, true)
+      rigidBodyRef.current.setLinvel({ x: Math.sin(rot) * 22, y: 0.15, z: Math.cos(rot) * 22 }, true)
     }
-    setTimeout(() => setIsTackling(false), 850)
+    setTimeout(() => setIsTackling(false), 800)
   }
 
   useFrame((state, delta) => {
     if (!rigidBodyRef.current) return
-
     const store = useGameStore.getState()
-    if (playerData?.id && store.redCards[playerData.id]) {
-      rigidBodyRef.current.setTranslation({ x: -99, y: -99, z: -99 }, true)
-      return
-    }
 
-    if (isSelected && indicatorRef.current) {
-      indicatorRef.current.rotation.y += delta * 3.5
-      indicatorRef.current.position.y = 2.85 + Math.sin(performance.now() * 0.006) * 0.15
+    // Dismissed (red card)
+    if (playerData?.id && store.redCards[playerData.id]) {
+      rigidBodyRef.current.setTranslation({ x: -120, y: -10, z: 0 }, true)
+      return
     }
 
     const pos = rigidBodyRef.current.translation()
     const vel = rigidBodyRef.current.linvel()
-    const { ballPosition, applyKick, triggerAction, setLastTouchTeam, setLastPasserId, updatePlayerDistance, matchStatus, cameraView, playerStamina, setPlayerStamina, team1Players, team2Players, playerDistancesToBall, tacticalPreset, refereeEvent } = store
-    const distToBall = Math.hypot(pos.x - ballPosition[0], pos.z - ballPosition[2])
+    const { ballPosition, matchStatus, refereeEvent, tacticalPreset, playerDistancesToBall } = store
 
+    // Register position and distance
+    const distToBall = Math.hypot(pos.x - ballPosition[0], pos.z - ballPosition[2])
     if (playerData?.id) {
-      updatePlayerDistance(playerData.id, distToBall)
+      store.updatePlayerDistance(playerData.id, distToBall)
       store.updatePlayerPosition(playerData.id, [pos.x, pos.y, pos.z])
     }
 
+    // ── Selected player indicator pulse ──────────────────────────
+    if (isSelected && indicatorRef.current) {
+      indicatorRef.current.rotation.y += delta * 3
+      indicatorRef.current.position.y = 3.0 + Math.sin(state.clock.elapsedTime * 5) * 0.12
+    }
+
+    // ── Freeze on non-playing state ──────────────────────────────
     if (matchStatus !== 'playing') {
-      rigidBodyRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      rigidBodyRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true)
       return
     }
 
-    const teammateIds = team === 1 ? team1Players.map(p => p.id) : team2Players.map(p => p.id)
-    const opponentIds = team === 1 ? team2Players.map(p => p.id) : team1Players.map(p => p.id)
-    const minTeammateDist = Math.min(...teammateIds.map(id => playerDistancesToBall[id] ?? 999))
-    const isClosestToBall = (playerDistancesToBall[playerData?.id || ''] ?? 999) <= minTeammateDist + 0.1
+    const teammateIds = team === 1 ? store.team1Players.map(p => p.id) : store.team2Players.map(p => p.id)
+    const opponentIds = team === 1 ? store.team2Players.map(p => p.id) : store.team1Players.map(p => p.id)
+    const myDist = playerDistancesToBall[playerData?.id || ''] ?? 999
+    const minTeamDist = Math.min(...teammateIds.map(id => playerDistancesToBall[id] ?? 999))
+    const isClosestToBall = myDist <= minTeamDist + 0.1
 
-    if (distToBall < 3.2 && store.ballPossession !== team && !isTackling) {
+    // Possession grab (contact range — tighter than before)
+    if (distToBall < 1.5 && store.ballPossession !== team) {
       store.setBallPossession(team)
     }
 
     let moveSpeedMagnitude = 0
 
-    // --- SLIDE TACKLE FOUL DETECTION & ANIMATION OVERRIDE ---
+    // ─────────────────────────────────────────────────────────────
+    // TACKLE FOUL DETECTION
+    // ─────────────────────────────────────────────────────────────
     if (isTackling && groupRef.current) {
-      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, -Math.PI / 2.3, 0.25)
-      
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, -Math.PI / 2.5, 0.2)
       for (const oppId of opponentIds) {
         const oppPos = store.playerPositions[oppId]
         if (oppPos) {
-          const distToOpp = Math.hypot(pos.x - oppPos[0], pos.z - oppPos[2])
-          if (distToOpp < 2.2 && distToBall > 1.6 && !store.refereeEvent) {
-            const isFromBehind = Math.random() < 0.25
-            const cardSeverity = isFromBehind ? 'red' : Math.random() < 0.65 ? 'yellow' : 'none'
-            store.addFoul(team, playerData?.id, cardSeverity)
+          const d = Math.hypot(pos.x - oppPos[0], pos.z - oppPos[2])
+          if (d < 2.0 && distToBall > 1.5 && !store.refereeEvent) {
+            const behind = Math.random() < 0.25
+            store.addFoul(team, playerData?.id, behind ? 'red' : Math.random() < 0.6 ? 'yellow' : 'none')
             store.setRefereeEvent('foul')
             audioEngine.playRefereeWhistle('short')
             audioEngine.playCrowdReaction('boo')
-            
-            setTimeout(() => {
-              store.setRefereeEvent(null)
-            }, 3000)
+            setTimeout(() => store.setRefereeEvent(null), 3000)
             break
           }
         }
       }
     } else if (groupRef.current && groupRef.current.rotation.x !== 0) {
-      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.2)
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, 0, 0.18)
     }
 
-    // --- SKILL MOVE (ZIDANE ROULETTE) ---
+    // ─────────────────────────────────────────────────────────────
+    // SKILL MOVE (body feint rotation)
+    // ─────────────────────────────────────────────────────────────
     if (skillMoveTimer > 0) {
-      setSkillMoveTimer(Math.max(0, skillMoveTimer - delta))
-      if (groupRef.current) {
-        groupRef.current.rotation.y += delta * 15
-      }
+      setSkillMoveTimer(prev => Math.max(0, prev - delta))
+      if (groupRef.current) groupRef.current.rotation.y += delta * 12
     }
 
-    // --- AI BEHAVIOR ---
+    // ─────────────────────────────────────────────────────────────
+    // GOAL CELEBRATION
+    // ─────────────────────────────────────────────────────────────
+    const t = state.clock.elapsedTime
+    if (refereeEvent === 'goal' && distToBall < 25) {
+      if (leftShoulderRef.current) leftShoulderRef.current.rotation.z = Math.PI / 2.5
+      if (rightShoulderRef.current) rightShoulderRef.current.rotation.z = -Math.PI / 2.5
+      if (torsoRef.current) torsoRef.current.position.y = 0.82 * heightScale + Math.abs(Math.sin(t * 9)) * 0.3
+      if (groupRef.current) groupRef.current.rotation.y += delta * 5
+      return
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // AI BEHAVIOUR (non-selected players)
+    // ─────────────────────────────────────────────────────────────
     if (!isSelected && !isTackling) {
+
+      // ── GK AI ────────────────────────────────────────────────
       if (isGK) {
-        const targetGoalX = team === 1 ? -49.5 : 49.5
-        const targetZ = Math.min(3.6, Math.max(-3.6, ballPosition[2]))
+        const goalX = team === 1 ? -49.5 : 49.5
+        const targetZ = THREE.MathUtils.clamp(ballPosition[2], -3.5, 3.5)
         const dz = targetZ - pos.z
-        const dx = targetGoalX - pos.x
-        
-        rigidBodyRef.current.setLinvel({ x: dx * 3.5, y: vel.y, z: dz * 4.5 }, true)
+        const dx = goalX - pos.x
+
+        // Smooth velocity instead of instant setLinvel
+        const desiredVX = dx * 3.2
+        const desiredVZ = dz * 4.2
+        rigidBodyRef.current.setLinvel(
+          {
+            x: THREE.MathUtils.lerp(vel.x, desiredVX, 0.25),
+            y: vel.y,
+            z: THREE.MathUtils.lerp(vel.z, desiredVZ, 0.35),
+          },
+          true
+        )
 
         if (groupRef.current) {
           groupRef.current.rotation.y = team === 1 ? Math.PI / 2 : -Math.PI / 2
           const ballSpeedXZ = Math.hypot(store.ballVelocity[0], store.ballVelocity[2])
-          if (distToBall < 9 && ballSpeedXZ > 11) {
-            if (ballPosition[2] < pos.z - 0.8) {
-               groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, -Math.PI / 2.3, 0.25)
-            } else if (ballPosition[2] > pos.z + 0.8) {
-               groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, Math.PI / 2.3, 0.25)
-            }
+          if (distToBall < 10 && ballSpeedXZ > 10) {
+            const diveDir = ballPosition[2] < pos.z ? -1 : 1
+            groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, diveDir * 1.1, 0.2)
           } else {
-            groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, 0, 0.15)
+            groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, 0, 0.12)
           }
         }
 
-        if (distToBall < 4.2 && Math.abs(pos.x) > 43) {
-          setLastTouchTeam(team, playerData?.id)
+        if (distToBall < 4.0 && Math.abs(pos.x) > 43) {
+          store.setLastTouchTeam(team, playerData?.id)
           store.setBallPossession(team)
           const target = findBestPassTarget(pos, playerData?.id, team, teammateIds, store.playerPositions, false)
-          if (target && Math.hypot(target[0] - pos.x, target[2] - pos.z) < 36) {
-            applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, false, team))
+          if (target) {
+            store.applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, false, team))
           } else {
-            applyKick([team === 1 ? 8.5 : -8.5, 2.5, (Math.random() - 0.5) * 3.5])
+            store.applyKick([team === 1 ? 7 : -7, 2, (Math.random() - 0.5) * 3])
           }
         }
-      } else {
-        const hasPossession = store.ballPossession === team
-        const role = playerData?.position || 'midfielder'
-        const anchor = calculateTacticalAnchor(role, position, ballPosition, team, hasPossession, tacticalPreset)
-        let targetX = anchor[0]
-        let targetZ = anchor[2]
+        return
+      }
 
-        if (isClosestToBall && (distToBall < 17 || !hasPossession)) {
-          targetX = ballPosition[0]
-          targetZ = ballPosition[2]
+      // ── Outfield AI ──────────────────────────────────────────
+      const hasPossession = store.ballPossession === team
+      const role = playerData?.position || 'midfielder'
+      const anchor = calculateTacticalAnchor(role, position, ballPosition, team, hasPossession, tacticalPreset)
+
+      let targetX = anchor[0]
+      let targetZ = anchor[2]
+
+      if (isClosestToBall && (distToBall < 18 || !hasPossession)) {
+        targetX = ballPosition[0]
+        targetZ = ballPosition[2]
+      }
+
+      const dx = targetX - pos.x
+      const dz = targetZ - pos.z
+      const distToTarget = Math.hypot(dx, dz)
+
+      if (distToTarget > 0.5) {
+        const speed = distToBall < 8 ? 15 : 10
+        moveSpeedMagnitude = speed
+        const norm = distToTarget || 1
+        rigidBodyRef.current.setLinvel({ x: (dx / norm) * speed, y: vel.y, z: (dz / norm) * speed }, true)
+        if (groupRef.current && distToTarget > 0.1 && skillMoveTimer === 0) {
+          groupRef.current.rotation.y = Math.atan2(dx, dz)
         }
+      } else {
+        rigidBodyRef.current.setLinvel({ x: vel.x * 0.75, y: vel.y, z: vel.z * 0.75 }, true)
+      }
 
-        const dx = targetX - pos.x
-        const dz = targetZ - pos.z
-        const distToTarget = Math.hypot(dx, dz)
+      // ── AI ball action (cooldown-gated, not random per frame) ─
+      aiCooldown.current = Math.max(0, aiCooldown.current - delta)
+      if (distToBall < 2.0 && !store.kickImpulse && aiCooldown.current <= 0) {
+        aiCooldown.current = 0.35 + Math.random() * 0.2 // 350–550ms between actions
+        store.setLastTouchTeam(team, playerData?.id)
+        store.setBallPossession(team)
+        const action = evaluateAIBallCarrierAction(pos, team, distToBall, store.playerPositions, opponentIds, tacticalPreset)
 
-        if (distToTarget > 0.5) {
-          const moveSpeed = distToBall < 6 ? 16 : 11
-          moveSpeedMagnitude = moveSpeed
-          const norm = distToTarget || 1
-          rigidBodyRef.current.setLinvel({ x: (dx / norm) * moveSpeed, y: vel.y, z: (dz / norm) * moveSpeed }, true)
-          if (groupRef.current && distToTarget > 0.1 && skillMoveTimer === 0) {
-            groupRef.current.rotation.y = Math.atan2(dx, dz)
+        if (action === 'shoot') {
+          store.applyKick(calculateShotImpulse(pos, team, 0.05))
+        } else if (action === 'pass') {
+          const target = findBestPassTarget(pos, playerData?.id, team, teammateIds, store.playerPositions, false)
+          if (target) {
+            store.setLastPasserId(playerData?.id || null)
+            store.applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, false, team))
           }
         } else {
-          rigidBodyRef.current.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true)
-        }
-
-        if (distToBall < 2.6 && !store.kickImpulse && Math.random() < 0.16) {
-          setLastTouchTeam(team, playerData?.id)
-          store.setBallPossession(team)
-          const action = evaluateAIBallCarrierAction(pos, team, distToBall, store.playerPositions, opponentIds, tacticalPreset)
-
-          if (action === 'shoot') {
-            applyKick(calculateShotImpulse(pos, team, 0.1))
-          } else if (action === 'pass') {
-            const target = findBestPassTarget(pos, playerData?.id, team, teammateIds, store.playerPositions, false)
-            if (target) {
-              setLastPasserId(playerData?.id || null)
-              applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, false, team))
-            }
-          } else {
-            if (groupRef.current) {
-              const dirX = Math.sin(groupRef.current.rotation.y)
-              const dirZ = Math.cos(groupRef.current.rotation.y)
-              store.setDribbleVelocity([dirX * 16, 0, dirZ * 16])
-            }
+          // Dribble: soft push
+          if (groupRef.current) {
+            const dirX = Math.sin(groupRef.current.rotation.y)
+            const dirZ = Math.cos(groupRef.current.rotation.y)
+            store.setDribbleVelocity([dirX * 14, 0, dirZ * 14])
           }
         }
       }
+
     } else if (isSelected && !isTackling) {
-      // --- USER CONTROLS WITH REAL-WORLD PACE & FATIGUE ---
+      // ─────────────────────────────────────────────────────────
+      // PLAYER CONTROL
+      // ─────────────────────────────────────────────────────────
       const { moveInput, activeAction, isSprinting } = store
-      const wantsToSprint = isSprinting || keysPressed.current['shift'] || keysPressed.current['l']
-      const canSprint = playerStamina > 8
-      const isSprintActive = wantsToSprint && canSprint
-      
-      // Integrate authentic player Pace rating (e.g. Mbappe Pace 97 vs Rodri Pace 66)
-      const paceFactor = (playerData?.stats?.pace || 85) / 85
-      const baseSprintSpeed = (playerStamina < 30 ? 18 : 25) * paceFactor
-      const currentSpeed = isSprintActive ? baseSprintSpeed : 15 * Math.min(1.1, paceFactor)
+      const wantsSprint = isSprinting || keysPressed.current['shift'] || keysPressed.current['l']
+      const stamina = store.playerStamina
+      const canSprint = stamina > 8
+      const sprinting = wantsSprint && canSprint
+      const paceFactor = (playerData?.stats?.pace || 82) / 82
+      const baseSpeed = sprinting
+        ? (stamina < 30 ? 17 : 24) * paceFactor
+        : 14 * Math.min(1.1, paceFactor)
 
-      let moveX = 0
-      let moveZ = 0
+      let mx = 0, mz = 0
+      if (keysPressed.current['w'] || keysPressed.current['arrowup']) mx += team === 1 ? 1 : -1
+      if (keysPressed.current['s'] || keysPressed.current['arrowdown']) mx -= team === 1 ? 1 : -1
+      if (keysPressed.current['a'] || keysPressed.current['arrowleft']) mz -= team === 1 ? 1 : -1
+      if (keysPressed.current['d'] || keysPressed.current['arrowright']) mz += team === 1 ? 1 : -1
+      if (Math.abs(moveInput.y) > 0.1) mx += -moveInput.y * (team === 1 ? 1 : -1)
+      if (Math.abs(moveInput.x) > 0.1) mz += moveInput.x * (team === 1 ? 1 : -1)
 
-      if (keysPressed.current['w'] || keysPressed.current['arrowup']) moveX += team === 1 ? 1 : -1
-      if (keysPressed.current['s'] || keysPressed.current['arrowdown']) moveX -= team === 1 ? 1 : -1
-      if (keysPressed.current['a'] || keysPressed.current['arrowleft']) moveZ -= team === 1 ? 1 : -1
-      if (keysPressed.current['d'] || keysPressed.current['arrowright']) moveZ += team === 1 ? 1 : -1
+      const mag = Math.hypot(mx, mz)
+      moveSpeedMagnitude = mag > 0 ? baseSpeed : 0
 
-      if (Math.abs(moveInput.y) > 0.1 || Math.abs(moveInput.x) > 0.1) {
-        moveX += -moveInput.y * (team === 1 ? 1 : -1)
-        moveZ += moveInput.x * (team === 1 ? 1 : -1)
-      }
+      if (sprinting && mag > 0) store.setPlayerStamina(stamina - delta * 15)
+      else if (!sprinting) store.setPlayerStamina(stamina + delta * (mag > 0 ? 4 : 11))
 
-      const magnitude = Math.hypot(moveX, moveZ)
-      moveSpeedMagnitude = magnitude > 0 ? currentSpeed : 0
-
-      if (moveSpeedMagnitude > 0) {
-        if (isSprintActive) setPlayerStamina(playerStamina - delta * 16)
-        else setPlayerStamina(playerStamina + delta * 5)
+      if (mag > 0) {
+        rigidBodyRef.current.setLinvel({ x: (mx / mag) * baseSpeed, y: vel.y, z: (mz / mag) * baseSpeed }, true)
+        if (groupRef.current && skillMoveTimer === 0) {
+          groupRef.current.rotation.y = Math.atan2(mx, mz)
+        }
       } else {
-        setPlayerStamina(playerStamina + delta * 12)
+        // Natural deceleration — don't hard-zero velocity
+        rigidBodyRef.current.setLinvel({ x: vel.x * 0.78, y: vel.y, z: vel.z * 0.78 }, true)
       }
 
-      if (magnitude > 0) {
-        moveX = (moveX / magnitude) * currentSpeed
-        moveZ = (moveZ / magnitude) * currentSpeed
-      }
+      // ── Action inputs ─────────────────────────────────────────
+      const shooting = activeAction === 'shoot' || keysPressed.current[' '] || keysPressed.current['k']
+      const through = activeAction === 'through' || keysPressed.current['i']
+      const passing = activeAction === 'pass' || keysPressed.current['j'] || through
+      const tackleAction = activeAction === 'tackle'
+      const skillAction = activeAction === 'skill'
 
-      rigidBodyRef.current.setLinvel({ x: moveX, y: vel.y, z: moveZ }, true)
-
-      if (magnitude > 0 && groupRef.current && skillMoveTimer === 0) {
-        groupRef.current.rotation.y = Math.atan2(moveX, moveZ)
-      }
-
-      // --- USER PASSING & SHOOTING ASSISTS ---
-      const isShooting = activeAction === 'shoot' || keysPressed.current[' '] || keysPressed.current['k']
-      const isThrough = activeAction === 'through' || keysPressed.current['i']
-      const isPassing = activeAction === 'pass' || keysPressed.current['j'] || isThrough
-      const isTacklingAction = activeAction === 'tackle'
-      const isSkillAction = activeAction === 'skill'
-
-      if (isTacklingAction && store.ballPossession !== team) {
-        triggerSlideTackle()
-        triggerAction(null)
-      } else if (isSkillAction && distToBall < 3.8) {
-        setSkillMoveTimer(0.45)
-        triggerAction(null)
-      } else if (distToBall < 3.8 && (isShooting || isPassing)) {
-        setLastTouchTeam(team, playerData?.id)
+      if (tackleAction && store.ballPossession !== team) {
+        triggerSlideTackle(); store.triggerAction(null)
+      } else if (skillAction && distToBall < 4) {
+        setSkillMoveTimer(0.4); store.triggerAction(null)
+      } else if (distToBall < 2.5 && (shooting || passing)) {
+        store.setLastTouchTeam(team, playerData?.id)
         store.setBallPossession(team)
-
-        if (isShooting) {
-          const fatigueError = playerStamina < 30 ? 0.28 : 0.0
-          applyKick(calculateShotImpulse(pos, team, fatigueError))
-        } else if (isPassing) {
-          const target = findBestPassTarget(pos, playerData?.id, team, teammateIds, store.playerPositions, isThrough)
+        if (shooting) {
+          const err = stamina < 30 ? 0.22 : 0.0
+          store.applyKick(calculateShotImpulse(pos, team, err))
+        } else {
+          const target = findBestPassTarget(pos, playerData?.id, team, teammateIds, store.playerPositions, through)
           if (target) {
-            setLastPasserId(playerData?.id || null)
-            applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, isThrough, team))
+            store.setLastPasserId(playerData?.id || null)
+            store.applyKick(calculatePassImpulse(pos, { x: target[0], y: target[1], z: target[2] }, through, team))
           }
         }
-        if (activeAction) triggerAction(null)
-      } else if (distToBall < 3.5 && magnitude > 1) {
-        setLastTouchTeam(team, playerData?.id)
+        if (activeAction) store.triggerAction(null)
+      } else if (distToBall < 2.2 && mag > 0.5) {
+        // Dribble push
+        store.setLastTouchTeam(team, playerData?.id)
         store.setBallPossession(team)
-        if (groupRef.current && (isSelected || isClosestToBall)) {
+        if (groupRef.current) {
           const dirX = Math.sin(groupRef.current.rotation.y)
           const dirZ = Math.cos(groupRef.current.rotation.y)
           const toPlayerX = pos.x - ballPosition[0]
           const toPlayerZ = pos.z - ballPosition[2]
-          
           store.setDribbleVelocity([
-            dirX * currentSpeed * 0.98 + toPlayerX * 1.5, 
-            0, 
-            dirZ * currentSpeed * 0.98 + toPlayerZ * 1.5
+            dirX * baseSpeed * 0.95 + toPlayerX * 1.2,
+            0,
+            dirZ * baseSpeed * 0.95 + toPlayerZ * 1.2,
           ])
         }
       }
-
-      // --- CAMERAS ---
-      if (matchStatus === 'playing') {
-        if (cameraView === 'third-person') {
-          const cameraOffsetX = team === 1 ? -14 : 14
-          const targetCamPos = new THREE.Vector3(pos.x + cameraOffsetX, pos.y + 7.5, pos.z * 0.7)
-          state.camera.position.lerp(targetCamPos, 0.08)
-          state.camera.lookAt(new THREE.Vector3(pos.x + (team === 1 ? 16 : -16), pos.y + 0.5, pos.z * 0.7))
-        } else if (cameraView === 'top-down') {
-          const targetCamPos = new THREE.Vector3(ballPosition[0], 45, ballPosition[2] + 0.1)
-          state.camera.position.lerp(targetCamPos, 0.05)
-          state.camera.lookAt(new THREE.Vector3(ballPosition[0], 0, ballPosition[2]))
-        } else if (cameraView === 'side-view') {
-          const targetCamPos = new THREE.Vector3(ballPosition[0] * 0.5, 20, 35)
-          state.camera.position.lerp(targetCamPos, 0.05)
-          state.camera.lookAt(new THREE.Vector3(ballPosition[0] * 0.5, 0, ballPosition[2] * 0.5))
-        }
-      }
     }
 
-    // --- BIOMECHANICAL PROCEDURAL KINEMATICS & CELEBRATIONS ---
-    const t = state.clock.elapsedTime
-    
-    if (refereeEvent === 'goal' && distToBall < 20) {
-      if (leftShoulderRef.current) leftShoulderRef.current.rotation.z = Math.PI / 2.2
-      if (rightShoulderRef.current) rightShoulderRef.current.rotation.z = -Math.PI / 2.2
-      if (torsoRef.current) torsoRef.current.position.y = (1.05 * heightScale) + Math.abs(Math.sin(t * 8)) * 0.35
-      if (groupRef.current) groupRef.current.rotation.y += delta * 6
-      return
-    }
-
+    // ─────────────────────────────────────────────────────────────
+    // HEAD TRACKING (ball awareness)
+    // ─────────────────────────────────────────────────────────────
     if (headRef.current && groupRef.current && !isTackling) {
       const toBallX = ballPosition[0] - pos.x
       const toBallZ = ballPosition[2] - pos.z
-      const globalBallAngle = Math.atan2(toBallX, toBallZ)
-      let relativeYaw = globalBallAngle - groupRef.current.rotation.y
-      
-      relativeYaw = ((relativeYaw + Math.PI) % (Math.PI * 2)) - Math.PI
-      if (relativeYaw < -Math.PI) relativeYaw += Math.PI * 2
-
-      if (Math.abs(relativeYaw) < 1.4 && distToBall < 30) {
-        headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, relativeYaw * 0.7, 0.15)
-        const toBallY = (ballPosition[1] - (pos.y + 1.7 * heightScale)) / (distToBall || 1)
-        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, -toBallY * 0.5, 0.15)
+      const globalAngle = Math.atan2(toBallX, toBallZ)
+      let relYaw = globalAngle - groupRef.current.rotation.y
+      relYaw = ((relYaw + Math.PI) % (Math.PI * 2)) - Math.PI
+      if (relYaw < -Math.PI) relYaw += Math.PI * 2
+      if (Math.abs(relYaw) < 1.5 && distToBall < 28) {
+        headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, relYaw * 0.6, 0.12)
+        const pitch = (ballPosition[1] - (pos.y + 1.65 * heightScale)) / Math.max(distToBall, 1)
+        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, -pitch * 0.45, 0.12)
       } else {
-        headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, 0, 0.12)
-        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0, 0.12)
+        headRef.current.rotation.y = THREE.MathUtils.lerp(headRef.current.rotation.y, 0, 0.1)
+        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0, 0.1)
       }
     }
 
-    const animSpeed = moveSpeedMagnitude * 0.75
-    if (moveSpeedMagnitude > 0.4 && !isTackling) {
-      const stride = Math.sin(t * animSpeed)
-      const cosStride = Math.cos(t * animSpeed)
+    // ─────────────────────────────────────────────────────────────
+    // PROCEDURAL LOCOMOTION ANIMATION
+    // Improved: proper knee bend on calf (joint pivot at top of calf mesh)
+    // animSpeed capped so legs don't spin at high velocity
+    // ─────────────────────────────────────────────────────────────
+    const speed = Math.hypot(vel.x, vel.z)
+    const strideFreq = THREE.MathUtils.clamp(speed * 1.4, 0, 8.5)
+    const strideDelta = strideFreq * delta
 
+    if (speed > 0.4 && !isTackling) {
+      const phase = (state.clock.elapsedTime * strideFreq) % (Math.PI * 2)
+      const swing = Math.sin(phase)
+      const swingCos = Math.cos(phase)
+
+      // Torso lean into direction of travel, and slight counter-rotation with stride
       if (torsoRef.current) {
-        torsoRef.current.rotation.x = THREE.MathUtils.lerp(torsoRef.current.rotation.x, 0.22 + Math.min(moveSpeedMagnitude * 0.012, 0.15), 0.15)
-        torsoRef.current.position.y = (0.95 * heightScale) + Math.abs(cosStride) * 0.05
+        const forwardLean = THREE.MathUtils.clamp(speed * 0.015, 0.05, 0.22)
+        torsoRef.current.rotation.x = THREE.MathUtils.lerp(torsoRef.current.rotation.x, forwardLean, 0.12)
+        torsoRef.current.rotation.z = THREE.MathUtils.lerp(torsoRef.current.rotation.z, swing * 0.04, 0.1)
+        // Vertical body bob
+        torsoRef.current.position.y = (0.82 * heightScale) + Math.abs(swingCos) * 0.04
       }
 
-      if (leftThighRef.current) leftThighRef.current.rotation.x = -stride * 0.75
-      if (rightThighRef.current) rightThighRef.current.rotation.x = stride * 0.75
+      // Hips: alternate swing (opposite to arms)
+      if (leftHipRef.current) {
+        leftHipRef.current.rotation.x = THREE.MathUtils.lerp(leftHipRef.current.rotation.x, -swing * 0.65, 0.18)
+      }
+      if (rightHipRef.current) {
+        rightHipRef.current.rotation.x = THREE.MathUtils.lerp(rightHipRef.current.rotation.x, swing * 0.65, 0.18)
+      }
 
-      if (leftCalfRef.current) leftCalfRef.current.rotation.x = stride > 0 ? stride * 0.8 : 0.05
-      if (rightCalfRef.current) rightCalfRef.current.rotation.x = stride < 0 ? -stride * 0.8 : 0.05
+      // Knees: flex backward when the hip swings forward (realistic knee bend)
+      if (leftKneeRef.current) {
+        const leftKneeFlex = swing > 0 ? swing * 0.7 : 0.05
+        leftKneeRef.current.rotation.x = THREE.MathUtils.lerp(leftKneeRef.current.rotation.x, leftKneeFlex, 0.2)
+      }
+      if (rightKneeRef.current) {
+        const rightKneeFlex = swing < 0 ? -swing * 0.7 : 0.05
+        rightKneeRef.current.rotation.x = THREE.MathUtils.lerp(rightKneeRef.current.rotation.x, rightKneeFlex, 0.2)
+      }
 
+      // Arms: swing opposite to legs
       if (leftShoulderRef.current) {
-        leftShoulderRef.current.rotation.x = stride * 0.6
-        leftShoulderRef.current.rotation.z = 0.15
+        leftShoulderRef.current.rotation.x = THREE.MathUtils.lerp(leftShoulderRef.current.rotation.x, swing * 0.55, 0.15)
+        leftShoulderRef.current.rotation.z = THREE.MathUtils.lerp(leftShoulderRef.current.rotation.z, 0.14, 0.1)
       }
       if (rightShoulderRef.current) {
-        rightShoulderRef.current.rotation.x = -stride * 0.6
-        rightShoulderRef.current.rotation.z = -0.15
+        rightShoulderRef.current.rotation.x = THREE.MathUtils.lerp(rightShoulderRef.current.rotation.x, -swing * 0.55, 0.15)
+        rightShoulderRef.current.rotation.z = THREE.MathUtils.lerp(rightShoulderRef.current.rotation.z, -0.14, 0.1)
       }
-      if (leftForearmRef.current) leftForearmRef.current.rotation.x = -0.45 - Math.abs(stride) * 0.2
-      if (rightForearmRef.current) rightForearmRef.current.rotation.x = -0.45 - Math.abs(stride) * 0.2
+      if (leftElbowRef.current) {
+        leftElbowRef.current.rotation.x = THREE.MathUtils.lerp(leftElbowRef.current.rotation.x, -0.55 - Math.abs(swing) * 0.25, 0.15)
+      }
+      if (rightElbowRef.current) {
+        rightElbowRef.current.rotation.x = THREE.MathUtils.lerp(rightElbowRef.current.rotation.x, -0.55 - Math.abs(swing) * 0.25, 0.15)
+      }
 
     } else if (!isTackling) {
-      const breath = Math.sin(t * 3.5)
+      // ── IDLE BREATHING ──────────────────────────────────────────
+      const breath = Math.sin(t * 2.8) * 0.012
       if (torsoRef.current) {
-        torsoRef.current.rotation.x = THREE.MathUtils.lerp(torsoRef.current.rotation.x, 0.05, 0.1)
-        torsoRef.current.position.y = (0.95 * heightScale) + breath * 0.015
+        torsoRef.current.rotation.x = THREE.MathUtils.lerp(torsoRef.current.rotation.x, 0.04, 0.08)
+        torsoRef.current.position.y = (0.82 * heightScale) + breath
       }
-
-      if (leftThighRef.current) leftThighRef.current.rotation.x = THREE.MathUtils.lerp(leftThighRef.current.rotation.x, -0.04, 0.15)
-      if (rightThighRef.current) rightThighRef.current.rotation.x = THREE.MathUtils.lerp(rightThighRef.current.rotation.x, 0.04, 0.15)
-      if (leftCalfRef.current) leftCalfRef.current.rotation.x = THREE.MathUtils.lerp(leftCalfRef.current.rotation.x, 0.08, 0.15)
-      if (rightCalfRef.current) rightCalfRef.current.rotation.x = THREE.MathUtils.lerp(rightCalfRef.current.rotation.x, 0.08, 0.15)
-      
-      if (leftShoulderRef.current) {
-        leftShoulderRef.current.rotation.x = THREE.MathUtils.lerp(leftShoulderRef.current.rotation.x, 0, 0.15)
-        leftShoulderRef.current.rotation.z = THREE.MathUtils.lerp(leftShoulderRef.current.rotation.z, 0.1, 0.15)
+      const idle = (ref: React.RefObject<THREE.Group | THREE.Mesh | null>, targetX: number, targetZ = 0) => {
+        if (!ref.current) return
+        ref.current.rotation.x = THREE.MathUtils.lerp(ref.current.rotation.x, targetX, 0.1)
+        ref.current.rotation.z = THREE.MathUtils.lerp(ref.current.rotation.z, targetZ, 0.1)
       }
-      if (rightShoulderRef.current) {
-        rightShoulderRef.current.rotation.x = THREE.MathUtils.lerp(rightShoulderRef.current.rotation.x, 0, 0.15)
-        rightShoulderRef.current.rotation.z = THREE.MathUtils.lerp(rightShoulderRef.current.rotation.z, -0.1, 0.15)
-      }
-      if (leftForearmRef.current) leftForearmRef.current.rotation.x = THREE.MathUtils.lerp(leftForearmRef.current.rotation.x, -0.25, 0.15)
-      if (rightForearmRef.current) rightForearmRef.current.rotation.x = THREE.MathUtils.lerp(rightForearmRef.current.rotation.x, -0.25, 0.15)
+      idle(leftHipRef, -0.04)
+      idle(rightHipRef, 0.04)
+      idle(leftKneeRef, 0.06)
+      idle(rightKneeRef, 0.06)
+      idle(leftShoulderRef, 0, 0.1)
+      idle(rightShoulderRef, 0, -0.1)
+      idle(leftElbowRef as any, -0.3)
+      idle(rightElbowRef as any, -0.3)
     }
   })
 
-  if (playerData?.id && useGameStore.getState().redCards[playerData.id]) {
-    return null
-  }
+  if (playerData?.id && useGameStore.getState().redCards[playerData.id]) return null
 
   return (
     <RigidBody
       ref={rigidBodyRef}
       position={position}
-      mass={78}
-      linearDamping={2.0}
-      angularDamping={4.0}
+      mass={76}
+      linearDamping={2.5}
+      angularDamping={5}
       enabledRotations={[false, true, false]}
       colliders={false}
     >
       <group
         ref={groupRef}
         scale={[1, heightScale, 1]}
-        onClick={(e) => {
-          e.stopPropagation()
-          onSelected?.()
-        }}
+        onClick={(e) => { e.stopPropagation(); onSelected?.() }}
       >
-        {/* --- TORSO & CHEST --- */}
-        <group ref={torsoRef} position={[0, 0.95, 0]}>
-          <mesh position={[0, 0.42, 0]} castShadow receiveShadow>
-            <boxGeometry args={[0.44, 0.38, 0.25]} />
-            <meshStandardMaterial
-              color={jerseyColor}
-              roughness={0.35}
-              emissive={isSelected ? trimColor : '#000000'}
-              emissiveIntensity={isSelected ? 0.3 : 0}
-            />
+        {/* ═══ TORSO GROUP ═══════════════════════════════════════ */}
+        <group ref={torsoRef} position={[0, 0.82, 0]}>
+
+          {/* Chest */}
+          <mesh position={[0, 0.34, 0]} castShadow>
+            <boxGeometry args={[BODY.chestW, BODY.chestH, BODY.chestD]} />
+            <meshStandardMaterial {...matJersey} />
           </mesh>
 
-          <mesh position={[0, 0.16, 0]} castShadow receiveShadow>
-            <boxGeometry args={[0.37, 0.28, 0.22]} />
-            <meshStandardMaterial color={jerseyColor} roughness={0.4} />
+          {/* Collar strip */}
+          <mesh position={[0, 0.52, 0]}>
+            <boxGeometry args={[BODY.chestW + 0.02, 0.04, BODY.chestD + 0.01]} />
+            <meshStandardMaterial {...matTrim} />
           </mesh>
 
-          <mesh position={[0, 0.62, 0]}>
-            <boxGeometry args={[0.46, 0.05, 0.26]} />
-            <meshStandardMaterial color={trimColor} roughness={0.2} metalness={0.2} />
+          {/* Abdomen */}
+          <mesh position={[0, 0.14, 0]} castShadow>
+            <boxGeometry args={[BODY.absW, BODY.absH, BODY.absD]} />
+            <meshStandardMaterial {...matJersey} />
           </mesh>
 
-          <group position={[0, 0.38, -0.14]} rotation={[0, Math.PI, 0]}>
-            <Text
-              position={[0, 0.18, 0]}
-              fontSize={0.065}
-              color={team === 1 ? '#000000' : '#ffffff'}
-              anchorX="center"
-              anchorY="middle"
-              fontWeight="bold"
-              letterSpacing={0.05}
-            >
-              {playerData?.name || (team === 1 ? 'BAKHTIYOR' : 'PLAYER')}
+          {/* Shorts */}
+          <mesh position={[0, -0.02, 0]} castShadow>
+            <boxGeometry args={[BODY.hipW, BODY.hipH, BODY.hipD]} />
+            <meshStandardMaterial {...matShorts} />
+          </mesh>
+
+          {/* Jersey name + number on back */}
+          <group position={[0, 0.34, -BODY.chestD / 2 - 0.001]} rotation={[0, Math.PI, 0]}>
+            <Text fontSize={0.058} color={team === 1 ? '#111111' : '#ffffff'} anchorX="center" anchorY="middle" position={[0, 0.16, 0]} fontWeight="bold" letterSpacing={0.04}>
+              {(playerData?.name || 'PLAYER').toUpperCase().slice(0, 9)}
             </Text>
-            <Text
-              position={[0, -0.06, 0]}
-              fontSize={0.24}
-              color={team === 1 ? '#000000' : '#ffffff'}
-              anchorX="center"
-              anchorY="middle"
-              fontWeight="black"
-            >
+            <Text fontSize={0.2} color={team === 1 ? '#111111' : '#ffffff'} anchorX="center" anchorY="middle" position={[0, -0.04, 0]} fontWeight="black">
               {jerseyNumber}
             </Text>
           </group>
 
-          <group ref={leftShoulderRef} position={[-0.30, 0.52, 0]}>
-            <mesh position={[-0.04, -0.14, 0]} castShadow>
-              <cylinderGeometry args={[0.065, 0.055, 0.32, 12]} />
-              <meshStandardMaterial color={jerseyColor} roughness={0.4} />
+          {/* ═══ LEFT ARM ══════════════════════════════════════════ */}
+          <group ref={leftShoulderRef} position={[-(BODY.chestW / 2 + 0.06), 0.42, 0]}>
+            {/* Shoulder cap */}
+            <mesh castShadow>
+              <sphereGeometry args={[BODY.shoulderRadius, 12, 10]} />
+              <meshStandardMaterial {...matJersey} />
             </mesh>
-            <mesh ref={leftForearmRef} position={[-0.04, -0.36, 0]} castShadow>
-              <cylinderGeometry args={[0.05, 0.045, 0.32, 12]} />
-              <meshStandardMaterial color="#ffdbac" roughness={0.6} />
+            {/* Upper arm */}
+            <mesh position={[-0.04, -BODY.upperArmLen / 2, 0]} castShadow>
+              <cylinderGeometry args={[BODY.upperArmR, BODY.upperArmR * 0.9, BODY.upperArmLen, 10]} />
+              <meshStandardMaterial {...matJersey} />
             </mesh>
+            {/* Forearm (elbow pivot) */}
+            <group ref={leftElbowRef} position={[-0.04, -BODY.upperArmLen, 0]}>
+              <mesh position={[0, -BODY.forearmLen / 2, 0]} castShadow>
+                <cylinderGeometry args={[BODY.forearmR, BODY.forearmR * 0.85, BODY.forearmLen, 10]} />
+                <meshStandardMaterial {...matSkin} />
+              </mesh>
+              {/* Hand */}
+              <mesh position={[0, -BODY.forearmLen - 0.04, 0]}>
+                <sphereGeometry args={[0.042, 8, 8]} />
+                <meshStandardMaterial {...matSkin} />
+              </mesh>
+            </group>
+            {/* GK glove */}
             {isGK && (
-              <mesh position={[-0.04, -0.54, 0.02]} castShadow>
-                <boxGeometry args={[0.14, 0.18, 0.16]} />
-                <meshStandardMaterial color="#ffffff" roughness={0.1} />
+              <mesh position={[-0.04, -BODY.upperArmLen - BODY.forearmLen - 0.06, 0]}>
+                <boxGeometry args={[0.11, 0.14, 0.08]} />
+                <meshStandardMaterial color="#ffffff" roughness={0.15} />
               </mesh>
             )}
           </group>
 
-          <group ref={rightShoulderRef} position={[0.30, 0.52, 0]}>
-            <mesh position={[0.04, -0.14, 0]} castShadow>
-              <cylinderGeometry args={[0.065, 0.055, 0.32, 12]} />
-              <meshStandardMaterial color={jerseyColor} roughness={0.4} />
+          {/* ═══ RIGHT ARM ═════════════════════════════════════════ */}
+          <group ref={rightShoulderRef} position={[BODY.chestW / 2 + 0.06, 0.42, 0]}>
+            <mesh castShadow>
+              <sphereGeometry args={[BODY.shoulderRadius, 12, 10]} />
+              <meshStandardMaterial {...matJersey} />
             </mesh>
-            <mesh ref={rightForearmRef} position={[0.04, -0.36, 0]} castShadow>
-              <cylinderGeometry args={[0.05, 0.045, 0.32, 12]} />
-              <meshStandardMaterial color="#ffdbac" roughness={0.6} />
+            <mesh position={[0.04, -BODY.upperArmLen / 2, 0]} castShadow>
+              <cylinderGeometry args={[BODY.upperArmR, BODY.upperArmR * 0.9, BODY.upperArmLen, 10]} />
+              <meshStandardMaterial {...matJersey} />
             </mesh>
+            <group ref={rightElbowRef} position={[0.04, -BODY.upperArmLen, 0]}>
+              <mesh position={[0, -BODY.forearmLen / 2, 0]} castShadow>
+                <cylinderGeometry args={[BODY.forearmR, BODY.forearmR * 0.85, BODY.forearmLen, 10]} />
+                <meshStandardMaterial {...matSkin} />
+              </mesh>
+              <mesh position={[0, -BODY.forearmLen - 0.04, 0]}>
+                <sphereGeometry args={[0.042, 8, 8]} />
+                <meshStandardMaterial {...matSkin} />
+              </mesh>
+            </group>
             {isGK && (
-              <mesh position={[0.04, -0.54, 0.02]} castShadow>
-                <boxGeometry args={[0.14, 0.18, 0.16]} />
-                <meshStandardMaterial color="#ffffff" roughness={0.1} />
+              <mesh position={[0.04, -BODY.upperArmLen - BODY.forearmLen - 0.06, 0]}>
+                <boxGeometry args={[0.11, 0.14, 0.08]} />
+                <meshStandardMaterial color="#ffffff" roughness={0.15} />
               </mesh>
             )}
           </group>
 
-          <group ref={headRef} position={[0, 0.72, 0]}>
-            <mesh position={[0, -0.06, 0]} castShadow>
-              <cylinderGeometry args={[0.06, 0.07, 0.12, 12]} />
-              <meshStandardMaterial color="#ffdbac" roughness={0.7} />
+          {/* ═══ NECK + HEAD ═══════════════════════════════════════ */}
+          <group ref={headRef} position={[0, 0.56, 0]}>
+            {/* Neck */}
+            <mesh position={[0, 0.05, 0]}>
+              <cylinderGeometry args={[BODY.neckR, BODY.neckR * 1.1, BODY.neckLen, 10]} />
+              <meshStandardMaterial {...matSkin} />
             </mesh>
-            <mesh position={[0, 0.12, 0]} castShadow>
-              <sphereGeometry args={[0.13, 24, 24]} />
-              <meshStandardMaterial color="#ffdbac" roughness={0.6} />
+            {/* Head — slightly oval (taller than wide) */}
+            <mesh position={[0, 0.17, 0]} castShadow>
+              <sphereGeometry args={[BODY.headR, 20, 20]} />
+              <meshStandardMaterial {...matSkin} />
             </mesh>
-            <mesh position={[0, 0.18, -0.02]} castShadow>
-              <sphereGeometry args={[0.135, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-              <meshStandardMaterial color="#1f140e" roughness={0.9} />
+            {/* Hair */}
+            <mesh position={[0, 0.23, -0.02]} castShadow>
+              <sphereGeometry args={[BODY.headR + 0.005, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+              <meshStandardMaterial color={playerData ? '#1a0a00' : '#3d2200'} roughness={0.95} />
             </mesh>
-            <mesh position={[0, 0.12, 0.13]}>
-              <boxGeometry args={[0.04, 0.06, 0.03]} />
-              <meshStandardMaterial color="#f6cf9f" roughness={0.6} />
+            {/* Face shadow (brow ridge) */}
+            <mesh position={[0, 0.2, BODY.headR - 0.01]}>
+              <boxGeometry args={[0.09, 0.025, 0.02]} />
+              <meshStandardMaterial {...matSkin} roughness={0.8} />
+            </mesh>
+            {/* Nose */}
+            <mesh position={[0, 0.15, BODY.headR + 0.01]}>
+              <boxGeometry args={[0.025, 0.032, 0.025]} />
+              <meshStandardMaterial {...matSkin} />
             </mesh>
           </group>
-
-          <mesh position={[0, -0.02, 0]} castShadow>
-            <boxGeometry args={[0.42, 0.36, 0.25]} />
-            <meshStandardMaterial color={shortsColor} roughness={0.5} />
-          </mesh>
         </group>
 
-        {/* --- LEFT LEG JOINT HIERARCHY --- */}
-        <group ref={leftThighRef} position={[-0.14, 0.95, 0]}>
-          <mesh position={[0, -0.22, 0]} castShadow>
-            <cylinderGeometry args={[0.095, 0.08, 0.45, 12]} />
-            <meshStandardMaterial color="#ffdbac" roughness={0.65} />
+        {/* ═══ LEFT LEG ══════════════════════════════════════════ */}
+        {/* Hip pivot at hip bone level */}
+        <group ref={leftHipRef} position={[-0.12, 0.82, 0]}>
+          {/* Thigh */}
+          <mesh position={[0, -BODY.thighLen / 2, 0]} castShadow>
+            <cylinderGeometry args={[BODY.thighR, BODY.thighR * 0.88, BODY.thighLen, 10]} />
+            <meshStandardMaterial {...matSkin} />
           </mesh>
-          <mesh ref={leftCalfRef} position={[0, -0.58, 0]} castShadow>
-            <cylinderGeometry args={[0.075, 0.065, 0.42, 12]} />
-            <meshStandardMaterial color={socksColor} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, -0.82, 0.05]} castShadow>
-            <boxGeometry args={[0.13, 0.12, 0.26]} />
-            <meshStandardMaterial color={bootColor} roughness={0.2} metalness={0.3} />
-          </mesh>
-          <mesh position={[0, -0.89, 0.05]}>
-            <boxGeometry args={[0.12, 0.02, 0.22]} />
-            <meshStandardMaterial color="#000000" roughness={0.1} />
-          </mesh>
+          {/* Knee pivot at bottom of thigh */}
+          <group ref={leftKneeRef} position={[0, -BODY.thighLen, 0]}>
+            {/* Knee cap sphere */}
+            <mesh>
+              <sphereGeometry args={[BODY.thighR * 0.9, 10, 10]} />
+              <meshStandardMaterial {...matSkin} />
+            </mesh>
+            {/* Calf */}
+            <mesh position={[0, -BODY.calfLen / 2 - 0.03, 0]} castShadow>
+              <cylinderGeometry args={[BODY.calfR, BODY.calfR * 0.72, BODY.calfLen, 10]} />
+              <meshStandardMaterial {...matSocks} />
+            </mesh>
+            {/* Boot */}
+            <mesh position={[0, -BODY.calfLen - 0.06, 0.04]} castShadow>
+              <boxGeometry args={[BODY.bootW, BODY.bootH, BODY.bootL]} />
+              <meshStandardMaterial {...matBoot} />
+            </mesh>
+            {/* Boot sole */}
+            <mesh position={[0, -BODY.calfLen - 0.11, 0.04]}>
+              <boxGeometry args={[BODY.bootW - 0.01, 0.02, BODY.bootL - 0.01]} />
+              <meshStandardMaterial color="#111" roughness={0.05} />
+            </mesh>
+          </group>
         </group>
 
-        {/* --- RIGHT LEG JOINT HIERARCHY --- */}
-        <group ref={rightThighRef} position={[0.14, 0.95, 0]}>
-          <mesh position={[0, -0.22, 0]} castShadow>
-            <cylinderGeometry args={[0.095, 0.08, 0.45, 12]} />
-            <meshStandardMaterial color="#ffdbac" roughness={0.65} />
+        {/* ═══ RIGHT LEG ═════════════════════════════════════════ */}
+        <group ref={rightHipRef} position={[0.12, 0.82, 0]}>
+          <mesh position={[0, -BODY.thighLen / 2, 0]} castShadow>
+            <cylinderGeometry args={[BODY.thighR, BODY.thighR * 0.88, BODY.thighLen, 10]} />
+            <meshStandardMaterial {...matSkin} />
           </mesh>
-          <mesh ref={rightCalfRef} position={[0, -0.58, 0]} castShadow>
-            <cylinderGeometry args={[0.075, 0.065, 0.42, 12]} />
-            <meshStandardMaterial color={socksColor} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, -0.82, 0.05]} castShadow>
-            <boxGeometry args={[0.13, 0.12, 0.26]} />
-            <meshStandardMaterial color={bootColor} roughness={0.2} metalness={0.3} />
-          </mesh>
-          <mesh position={[0, -0.89, 0.05]}>
-            <boxGeometry args={[0.12, 0.02, 0.22]} />
-            <meshStandardMaterial color="#000000" roughness={0.1} />
-          </mesh>
+          <group ref={rightKneeRef} position={[0, -BODY.thighLen, 0]}>
+            <mesh>
+              <sphereGeometry args={[BODY.thighR * 0.9, 10, 10]} />
+              <meshStandardMaterial {...matSkin} />
+            </mesh>
+            <mesh position={[0, -BODY.calfLen / 2 - 0.03, 0]} castShadow>
+              <cylinderGeometry args={[BODY.calfR, BODY.calfR * 0.72, BODY.calfLen, 10]} />
+              <meshStandardMaterial {...matSocks} />
+            </mesh>
+            <mesh position={[0, -BODY.calfLen - 0.06, 0.04]} castShadow>
+              <boxGeometry args={[BODY.bootW, BODY.bootH, BODY.bootL]} />
+              <meshStandardMaterial {...matBoot} />
+            </mesh>
+            <mesh position={[0, -BODY.calfLen - 0.11, 0.04]}>
+              <boxGeometry args={[BODY.bootW - 0.01, 0.02, BODY.bootL - 0.01]} />
+              <meshStandardMaterial color="#111" roughness={0.05} />
+            </mesh>
+          </group>
         </group>
 
+        {/* ═══ SELECTED INDICATOR ════════════════════════════════ */}
         {isSelected && (
-          <mesh ref={indicatorRef} position={[0, 2.85, 0]} rotation={[Math.PI, 0, 0]}>
-            <coneGeometry args={[0.22, 0.35, 4]} />
+          <mesh ref={indicatorRef} position={[0, 3.0, 0]} rotation={[Math.PI, 0, 0]}>
+            <coneGeometry args={[0.18, 0.28, 4]} />
             <meshStandardMaterial
               color="#4ade80"
               emissive="#22c55e"
-              emissiveIntensity={3.2}
+              emissiveIntensity={2.5}
               roughness={0.1}
-              metalness={0.8}
+              metalness={0.6}
             />
           </mesh>
         )}
       </group>
 
-      <CapsuleCollider args={[0.6 * heightScale, 0.25]} position={[0, 0.95 * heightScale, 0]} />
+      {/* Capsule collider — adjusted to real player height */}
+      <CapsuleCollider
+        args={[0.55 * heightScale, 0.22]}
+        position={[0, 0.88 * heightScale, 0]}
+      />
     </RigidBody>
   )
 }

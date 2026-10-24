@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Pause, Trophy, Shield, Flag, Repeat, Camera, LogOut, Sliders, RefreshCw, FileText, Settings as SettingsIcon, AlertCircle, BarChart2, Maximize, Minimize } from 'lucide-react'
 import { useGameStore, TacticalPreset } from '@/lib/game-store'
 
@@ -10,7 +10,6 @@ interface MatchHUDProps {
   team2Score?: number
   team1Name?: string
   team2Name?: string
-  possession?: { team1: number; team2: number }
   onPause?: () => void
   onExit?: () => void
 }
@@ -18,7 +17,6 @@ interface MatchHUDProps {
 export function MatchHUD({
   team1Name = 'RMA',
   team2Name = 'MCI',
-  possession = { team1: 54, team2: 46 },
   onPause,
   onExit,
 }: MatchHUDProps) {
@@ -52,6 +50,24 @@ export function MatchHUD({
   const currentTime = storeTime || 0
   const minutes = Math.floor(currentTime / 60)
   const seconds = Math.floor(currentTime % 60)
+
+  // ── Real possession tracking (accumulate ticks by possessing team) ──
+  const possessionTicks = useRef({ team1: 0, team2: 0 })
+  useEffect(() => {
+    const id = setInterval(() => {
+      const { ballPossession: poss } = useGameStore.getState()
+      if (poss === 1) possessionTicks.current.team1++
+      else if (poss === 2) possessionTicks.current.team2++
+    }, 500)
+    return () => clearInterval(id)
+  }, [])
+  const totalTicks = possessionTicks.current.team1 + possessionTicks.current.team2
+  const possession = totalTicks > 0
+    ? {
+        team1: Math.round((possessionTicks.current.team1 / totalTicks) * 100),
+        team2: Math.round((possessionTicks.current.team2 / totalTicks) * 100),
+      }
+    : { team1: 50, team2: 50 }
 
   const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
@@ -203,7 +219,7 @@ export function MatchHUD({
           </div>
 
           <div className="h-7 sm:h-9 px-2 sm:px-4 bg-slate-950/90 border border-slate-800 rounded-lg flex items-center text-white font-mono font-bold text-xs sm:text-base">
-            {String(minutes + 70).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+            {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
           </div>
         </div>
 
